@@ -11,17 +11,18 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/quaternion.hpp>
 
+#include <string>
 #include <random>
 
 GLuint phonebank_meshes_for_lit_color_texture_program = 0;
 Load< MeshBuffer > phonebank_meshes(LoadTagDefault, []() -> MeshBuffer const * {
-	MeshBuffer const *ret = new MeshBuffer(data_path("phone-bank.pnct"));
+	MeshBuffer const *ret = new MeshBuffer(data_path("track.pnct"));
 	phonebank_meshes_for_lit_color_texture_program = ret->make_vao_for_program(lit_color_texture_program->program);
 	return ret;
 });
 
 Load< Scene > phonebank_scene(LoadTagDefault, []() -> Scene const * {
-	return new Scene(data_path("phone-bank.scene"), [&](Scene &scene, Scene::Transform *transform, std::string const &mesh_name){
+	return new Scene(data_path("track.scene"), [&](Scene &scene, Scene::Transform *transform, std::string const &mesh_name){
 		Mesh const &mesh = phonebank_meshes->lookup(mesh_name);
 
 		scene.drawables.emplace_back(transform);
@@ -39,7 +40,7 @@ Load< Scene > phonebank_scene(LoadTagDefault, []() -> Scene const * {
 
 WalkMesh const *walkmesh = nullptr;
 Load< WalkMeshes > phonebank_walkmeshes(LoadTagDefault, []() -> WalkMeshes const * {
-	WalkMeshes *ret = new WalkMeshes(data_path("phone-bank.w"));
+	WalkMeshes *ret = new WalkMeshes(data_path("track.w"));
 	walkmesh = &ret->lookup("WalkMesh");
 	return ret;
 });
@@ -57,8 +58,16 @@ PlayMode::PlayMode() : scene(*phonebank_scene) {
 	player.camera->near = 0.01f;
 	player.camera->transform->parent = player.transform;
 
+	for (auto &transform : scene.transforms) {
+		std::cout << transform.name << std::endl;
+		if (transform.name == "Donut")
+			donut_transform = &transform;
+	}
+	assert(donut_transform != nullptr);
+	move_donut();
+
 	//player's eyes are 1.8 units above the ground:
-	player.camera->transform->position = glm::vec3(0.0f, 0.0f, 1.8f);
+	player.camera->transform->position = glm::vec3(0.0f, 0.0f, 8.8f);
 
 	//rotate camera facing direction (-z) to player facing direction (+y):
 	player.camera->transform->rotation = glm::angleAxis(glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
@@ -92,6 +101,9 @@ bool PlayMode::handle_event(SDL_Event const &evt, glm::uvec2 const &window_size)
 		} else if (evt.key.keysym.sym == SDLK_s) {
 			down.downs += 1;
 			down.pressed = true;
+			return true;
+		} else if (evt.key.keysym.sym == SDLK_r) {
+			reset_level();
 			return true;
 		}
 	} else if (evt.type == SDL_KEYUP) {
@@ -136,22 +148,72 @@ bool PlayMode::handle_event(SDL_Event const &evt, glm::uvec2 const &window_size)
 	return false;
 }
 
+void PlayMode::move_donut() {
+	glm::vec3 new_donut_pos = glm::vec3((rand() % 190) - 110.0f, (rand() % 150) - 70.f, 0.0f);
+	donut_at = walkmesh->nearest_walk_point(new_donut_pos);
+	donut_transform->position = walkmesh->to_world_point(donut_at);
+}
+
+void PlayMode::reset_level() {
+	game_over = false;
+	score = 0;
+
+	hunger = 1.0f;
+
+	move_donut();
+
+	player.camera->transform->position = glm::vec3(0.0f, 0.0f, 8.8f);
+
+	//rotate camera facing direction (-z) to player facing direction (+y):
+	player.camera->transform->rotation = glm::angleAxis(glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+
+	//start player walking at nearest walk point:
+	player.at = walkmesh->nearest_walk_point(player.transform->position);
+}
+
 void PlayMode::update(float elapsed) {
 	//player walking:
 	{
 		//combine inputs into a move:
-		constexpr float PlayerSpeed = 3.0f;
+		constexpr float PlayerSpeed = 1.0f;
+		constexpr float PlayerAccel = 100.0f;
+		constexpr float PlayerMinSpeed = 0.01f;
 		glm::vec2 move = glm::vec2(0.0f);
-		if (left.pressed && !right.pressed) move.x =-1.0f;
-		if (!left.pressed && right.pressed) move.x = 1.0f;
-		if (down.pressed && !up.pressed) move.y =-1.0f;
-		if (!down.pressed && up.pressed) move.y = 1.0f;
+		if (!game_over) {
+			if (left.pressed && !right.pressed) {
+				player.velocity.x = -PlayerSpeed;
+			}
+			if (!left.pressed && right.pressed) {
+				player.velocity.x = PlayerSpeed;
+			}
+			if (down.pressed && !up.pressed) {
+				player.velocity.y = -PlayerSpeed;
+				//player.velocity += player.transform->make_local_to_world() * glm::vec4(0.0f, -PlayerAccel * elapsed * elapsed, 0.0f, 0.0f);
+			}
+			if (!down.pressed && up.pressed) {
+				player.velocity.y = PlayerSpeed;
+			}
+
+			float speed = glm::length(player.velocity);
+			if (speed > PlayerSpeed) player.velocity = player.velocity * PlayerSpeed / speed;
+			if (!left.pressed && !right.pressed && !up.pressed && !down.pressed) {
+				if (speed >= PlayerMinSpeed) player.velocity *= 0.9f;
+				else player.velocity = glm::vec3(0.0f);
+			}
+			
+			if (player.velocity == glm::vec3(0.0f)) {
+				hunger -= 0.01f * elapsed;
+			}
+			else {
+				hunger -= 0.1f * elapsed;
+			}
+		}
 
 		//make it so that moving diagonally doesn't go faster:
-		if (move != glm::vec2(0.0f)) move = glm::normalize(move) * PlayerSpeed * elapsed;
+		//if (move != glm::vec2(0.0f)) move = glm::normalize(move) * PlayerSpeed * elapsed;
 
 		//get move in world coordinate system:
-		glm::vec3 remain = player.transform->make_local_to_world() * glm::vec4(move.x, move.y, 0.0f, 0.0f);
+		glm::vec3 remain = player.transform->make_local_to_world() * glm::vec4(player.velocity.x, player.velocity.y, 0.0f, 0.0f);
 
 		//using a for() instead of a while() here so that if walkpoint gets stuck in
 		// some awkward case, code will not infinite loop:
@@ -212,6 +274,15 @@ void PlayMode::update(float elapsed) {
 			player.transform->rotation = glm::normalize(adjust * player.transform->rotation);
 		}
 
+		if (glm::length(player.transform->position - donut_transform->position) <= DONUT_PICKUP_RADIUS) {
+			hunger = glm::min(hunger + 0.3f, 1.0f);
+			score++;
+			move_donut();
+		}
+		if (hunger <= 0.0f) {
+			game_over = true;
+		}
+
 		/*
 		glm::mat4x3 frame = camera->transform->make_local_to_parent();
 		glm::vec3 right = frame[0];
@@ -260,13 +331,16 @@ void PlayMode::draw(glm::uvec2 const &drawable_size) {
 			0.0f, 0.0f, 0.0f, 1.0f
 		));
 
+		std::string game_text = "Hunger: " + std::to_string((int) (hunger * 100.0f)) + " Score: " + std::to_string(score);
+		if (game_over) game_text = "Game Over. R to restart";
+
 		constexpr float H = 0.09f;
-		lines.draw_text("Mouse motion looks; WASD moves; escape ungrabs mouse",
+		lines.draw_text(game_text,
 			glm::vec3(-aspect + 0.1f * H, -1.0 + 0.1f * H, 0.0),
 			glm::vec3(H, 0.0f, 0.0f), glm::vec3(0.0f, H, 0.0f),
 			glm::u8vec4(0x00, 0x00, 0x00, 0x00));
 		float ofs = 2.0f / drawable_size.y;
-		lines.draw_text("Mouse motion looks; WASD moves; escape ungrabs mouse",
+		lines.draw_text(game_text,
 			glm::vec3(-aspect + 0.1f * H + ofs, -1.0 + + 0.1f * H + ofs, 0.0),
 			glm::vec3(H, 0.0f, 0.0f), glm::vec3(0.0f, H, 0.0f),
 			glm::u8vec4(0xff, 0xff, 0xff, 0x00));

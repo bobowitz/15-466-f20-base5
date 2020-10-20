@@ -1,8 +1,8 @@
-# (TODO: your game's title)
+# Donut Starve
 
-Author: (TODO: your name)
+Author: Alton Olson
 
-Design: (TODO: In two sentences or fewer, describe what is new and interesting about your game.)
+Design: As an inhabitant of a topsy-turvy world, you hunt for wild donuts in the fight for survival.
 
 Screen Shot:
 
@@ -10,9 +10,9 @@ Screen Shot:
 
 How To Play:
 
-(TODO: describe the controls and (if needed) goals/strategy.)
+WASD to move, mouse to look around. Get the donut before your hunger counter drops to 0. Moving makes your hunger run out faster.
 
-Sources: (TODO: list a source URL for any assets you did not create yourself. Make sure you have a license for the asset.)
+Sources: N/A
 
 This game was built with [NEST](NEST.md).
 
